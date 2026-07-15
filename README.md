@@ -19,13 +19,13 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Set `OPENAI_API_KEY` in `.env.local` before analyzing messages.
+Set `GEMINI_API_KEY` in `.env.local` before analyzing messages. The default runtime is Gemini; `LLM_PROVIDER` accepts `gemini`, `groq`, or `openai` so additional providers can be added behind the same analysis contract.
 
 ## Deploy to Vercel
 
 1. Push this repository to GitHub and import it at [vercel.com/new](https://vercel.com/new).
 2. Vercel detects Next.js automatically; leave the build settings unchanged.
-3. In **Project Settings → Environment Variables**, add `OPENAI_API_KEY` with your OpenAI API key for Production (and Preview if needed).
+3. In **Project Settings → Environment Variables**, add `GEMINI_API_KEY` and `LLM_PROVIDER=gemini` for Production (and Preview if needed).
 4. Deploy. Vercel runs `npm run build` and hosts the app.
 
 Never commit `.env.local` or expose the API key in browser code.

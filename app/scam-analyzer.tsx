@@ -23,7 +23,7 @@ const verdictStyles = {
   likely_safe: "border-emerald-300 bg-emerald-50 text-emerald-950"
 };
 
-function resolveSegments(message: string, segments: Segment[]): ResolvedSegment[] {
+export function resolveSegments(message: string, segments: Segment[]): ResolvedSegment[] {
   const occurrences = new Map<string, number>();
 
   return segments

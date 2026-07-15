@@ -55,7 +55,6 @@ export async function POST(request: Request) {
     return NextResponse.json(normalizeAnalysis(analysis));
   } catch (error) {
     console.error("Analysis failed", error);
-    const message = error instanceof Error ? error.message : "Raksha could not analyze that message. Please try again.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Analysis failed, please try again." }, { status: 500 });
   }
 }

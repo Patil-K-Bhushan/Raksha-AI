@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { demoInbox } from "../lib/demo-inbox";
 
 describe("demo inbox", () => {
-  it("contains 12 messages with unique ids", () => {
-    expect(demoInbox).toHaveLength(12);
-    expect(new Set(demoInbox.map((item) => item.id)).size).toBe(12);
+  it("contains 13 messages with unique ids", () => {
+    expect(demoInbox).toHaveLength(13);
+    expect(new Set(demoInbox.map((item) => item.id)).size).toBe(13);
   });
 
   it("includes the three legitimate messages (the false-positive proof)", () => {
@@ -13,6 +13,11 @@ describe("demo inbox", () => {
     expect(ids).toContain("sbi-debit");
     expect(ids).toContain("flipkart-delivery");
     expect(ids).toContain("hdfc-otp");
+  });
+
+  it("includes the prompt-injection attack demo (the second-wow trigger)", () => {
+    const injection = demoInbox.find((item) => item.id === "injection-attack")!;
+    expect(injection.message.toLowerCase()).toContain("ignore previous instructions");
   });
 
   it("keeps the real SBI debit SMS with its official helpline line intact", () => {

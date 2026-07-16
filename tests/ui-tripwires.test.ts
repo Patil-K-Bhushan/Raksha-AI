@@ -25,7 +25,7 @@ describe("injection banner (ADVANCE 2)", () => {
 
 describe("confidence display (FIX 1)", () => {
   it("every confidence rendered in the UI goes through capConfidence", () => {
-    for (const file of ["scam-analyzer.tsx", "inbox-scan.tsx"]) {
+    for (const file of ["scam-analyzer.tsx", "inbox-scan.tsx", "scam-simulator.tsx"]) {
       const source = read(file);
       const rendersConfidence = source.includes("confidence");
       if (rendersConfidence) {

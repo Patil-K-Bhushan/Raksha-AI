@@ -46,4 +46,4 @@ The analysis prompt now decides by locating the **extraction point** (link click
 
 - Fix the error-message leak (above).
 - Render `injection_detected: true` as a Trap Map tactic (planned Day 2).
-- Provider note: analysis now defaults to Gemini (`LLM_PROVIDER=gemini`); the OpenAI provider path throws "not configured". Flagged for spec review — AGENTS.md §6 lists the OpenAI API as required for the hackathon.
+- ~~Provider note: OpenAI path unimplemented~~ Resolved: `LLM_PROVIDER` now supports `gemini` (default), `openai`, and `groq` with the same untrusted-data handling. OpenAI strict structured outputs get a sanitized schema (`minimum`/`maximum` stripped); bounds stay enforced by `capConfidence` server-side. New AI surfaces follow the same rules: `/api/inbox-summary` wraps scan snippets in a fresh UUID delimiter, and `/api/simulate` accepts only whitelisted scam types so arbitrary user input can never reach the instruction position.

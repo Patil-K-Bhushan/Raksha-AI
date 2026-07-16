@@ -12,6 +12,18 @@ export type ScamAnalysis = {
   language_outputs: { hi: string; mr: string; en: string };
 };
 
+export type QuickVerdict = Pick<ScamAnalysis, "verdict" | "confidence" | "scam_type">;
+
+/** No verdict may ever read as "100% safe" (or 100% anything). */
+export const CONFIDENCE_HARD_CAP = 95;
+export const LIKELY_SAFE_CONFIDENCE_CAP = 85;
+
+/** Clamps to 0–100, then caps at 95 for all verdicts and 85 for likely_safe. */
+export function capConfidence(confidence: number, verdict: Verdict): number {
+  const clamped = Math.max(0, Math.min(100, Number(confidence) || 0));
+  return Math.min(clamped, verdict === "likely_safe" ? LIKELY_SAFE_CONFIDENCE_CAP : CONFIDENCE_HARD_CAP);
+}
+
 export const analysisSchema = {
   type: "object",
   additionalProperties: false,
@@ -57,5 +69,25 @@ export const analysisSchema = {
         en: { type: "string" }
       }
     }
+  }
+} as const;
+
+export const quickVerdictSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict", "confidence", "scam_type"],
+  properties: {
+    verdict: { type: "string", enum: ["scam", "suspicious", "likely_safe"] },
+    confidence: { type: "number", minimum: 0, maximum: 100 },
+    scam_type: { type: "string" }
+  }
+} as const;
+
+export const chatSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["answer"],
+  properties: {
+    answer: { type: "string" }
   }
 } as const;

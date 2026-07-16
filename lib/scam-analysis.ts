@@ -91,3 +91,57 @@ export const chatSchema = {
     answer: { type: "string" }
   }
 } as const;
+
+export type InboxSummary = {
+  headline: string;
+  threat_level: "low" | "medium" | "high";
+  advice: string;
+  language_outputs: { hi: string; mr: string; en: string };
+};
+
+export const inboxSummarySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["headline", "threat_level", "advice", "language_outputs"],
+  properties: {
+    headline: { type: "string" },
+    threat_level: { type: "string", enum: ["low", "medium", "high"] },
+    advice: { type: "string" },
+    language_outputs: {
+      type: "object",
+      additionalProperties: false,
+      required: ["hi", "mr", "en"],
+      properties: {
+        hi: { type: "string" },
+        mr: { type: "string" },
+        en: { type: "string" }
+      }
+    }
+  }
+} as const;
+
+export type SimulatedScam = {
+  message: string;
+  analysis: ScamAnalysis;
+};
+
+export const simulatedScamSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["message", "analysis"],
+  properties: {
+    message: { type: "string" },
+    analysis: analysisSchema
+  }
+} as const;
+
+export const SIMULATOR_SCAM_TYPES = [
+  "digital arrest",
+  "UPI collect",
+  "fake parcel",
+  "job scam",
+  "loan app",
+  "KYC phishing",
+  "lottery",
+  "investment"
+] as const;

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { demoInbox } from "@/lib/demo-inbox";
-import { capConfidence, type QuickVerdict, type ScamAnalysis } from "@/lib/scam-analysis";
+import { capConfidence, type InboxSummary, type QuickVerdict, type ScamAnalysis } from "@/lib/scam-analysis";
 import { InjectionBanner, TrapMap, shortVerdictLabels, verdictChipStyles, verdictLabels, type Language } from "./trap-map";
 
 type RowStatus = "pending" | "scanning" | "done" | "error";
@@ -47,6 +47,8 @@ export default function InboxScan({ language }: { language: Language }) {
   const [scanning, setScanning] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [summary, setSummary] = useState<InboxSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
 
   function patchRow(id: string, patch: Partial<Row>) {
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
@@ -61,7 +63,9 @@ export default function InboxScan({ language }: { language: Language }) {
     setExpandedId(null);
     setRows(initial);
     setScanning(true);
+    setSummary(null);
 
+    const results: { verdict: string; scam_type: string; snippet: string }[] = [];
     let index = 0;
     async function worker() {
       while (index < initial.length) {
@@ -71,6 +75,7 @@ export default function InboxScan({ language }: { language: Language }) {
         try {
           const quick = (await postAnalyze(row.message, "quick")) as QuickVerdict;
           patchRow(row.id, { status: "done", quick });
+          results.push({ verdict: quick.verdict, scam_type: quick.scam_type, snippet: row.message.slice(0, 300) });
         } catch {
           patchRow(row.id, { status: "error" });
         }
@@ -78,6 +83,24 @@ export default function InboxScan({ language }: { language: Language }) {
     }
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, initial.length) }, worker));
     setScanning(false);
+
+    // Agentic second step: aggregate the fan-out results into one guardian briefing.
+    if (results.length >= 2) {
+      setSummaryLoading(true);
+      try {
+        const response = await fetch("/api/inbox-summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ results })
+        });
+        const payload = (await response.json()) as InboxSummary | { error: string };
+        if (response.ok && !("error" in payload)) setSummary(payload);
+      } catch {
+        // Briefing is a bonus layer — the triage list stands on its own.
+      } finally {
+        setSummaryLoading(false);
+      }
+    }
   }
 
   async function toggleExpand(row: Row) {
@@ -126,7 +149,7 @@ export default function InboxScan({ language }: { language: Language }) {
             onClick={() => void scan(demoInbox.map((item) => ({ ...item, status: "pending" as RowStatus })))}
             className="rounded-xl border-2 border-emerald-700 px-4 py-2.5 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
           >
-            Scan demo inbox (12)
+            Scan demo inbox ({demoInbox.length})
           </button>
           <button
             type="button"
@@ -144,6 +167,29 @@ export default function InboxScan({ language }: { language: Language }) {
         <div className="mt-8 rounded-2xl border border-dashed border-stone-300 bg-white/60 p-6 text-center text-stone-500">
           <p className="font-semibold">Your triaged inbox will appear here.</p>
           <p className="mt-1 text-sm">Red = scam · Yellow = suspicious · Green = likely safe (stay cautious)</p>
+        </div>
+      )}
+
+      {summaryLoading && (
+        <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-4 text-sm font-semibold text-stone-600 shadow-sm">
+          Raksha is writing your inbox briefing…
+        </div>
+      )}
+      {summary && (
+        <div
+          className={`mt-6 rounded-2xl border-2 p-4 shadow-sm sm:p-5 ${
+            summary.threat_level === "high"
+              ? "border-red-500 bg-red-50 text-red-950"
+              : summary.threat_level === "medium"
+                ? "border-amber-500 bg-amber-50 text-amber-950"
+                : "border-emerald-600 bg-emerald-50 text-emerald-950"
+          }`}
+          role="status"
+        >
+          <p className="text-xs font-black uppercase tracking-wide opacity-70">Guardian briefing · threat level {summary.threat_level}</p>
+          <p className="mt-1 text-xl font-black leading-8 sm:text-2xl">{summary.headline}</p>
+          <p className="mt-2 text-lg font-bold leading-8">{summary.language_outputs[language]}</p>
+          {language === "en" && <p className="mt-2 text-sm font-semibold">{summary.advice}</p>}
         </div>
       )}
 

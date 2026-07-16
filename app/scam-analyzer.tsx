@@ -4,13 +4,14 @@ import { FormEvent, useState } from "react";
 import { exampleFixtures } from "@/lib/example-fixtures";
 import { capConfidence, type QuickVerdict, type ScamAnalysis } from "@/lib/scam-analysis";
 import InboxScan from "./inbox-scan";
+import ScamSimulator from "./scam-simulator";
 import { InjectionBanner, TrapMap, verdictLabels, verdictStyles, type Language } from "./trap-map";
 
 // Re-exported so tests and other modules keep a stable import path.
 export { resolveSegments } from "./trap-map";
 
 type Analysis = ScamAnalysis;
-type Mode = "single" | "inbox";
+type Mode = "single" | "inbox" | "simulator";
 
 function VerdictBanner({ verdict, language, analysis }: { verdict: QuickVerdict; language: Language; analysis: Analysis | null }) {
   const languageName = { en: "English", hi: "हिंदी", mr: "मराठी" }[language];
@@ -94,15 +95,16 @@ export default function ScamAnalyzer() {
         </div>
       </header>
 
-      <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-stone-300 bg-white p-1 sm:inline-flex" role="tablist" aria-label="Analysis mode">
-        {([["single", "Single message"], ["inbox", "Inbox scan"]] as [Mode, string][]).map(([value, label]) => (
-          <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={`rounded-lg px-4 py-2 text-sm font-black transition ${mode === value ? "bg-stone-950 text-white" : "text-stone-600 hover:text-stone-900"}`}>
+      <div className="mt-6 grid grid-cols-3 gap-1 rounded-xl border border-stone-300 bg-white p-1 sm:inline-flex" role="tablist" aria-label="Analysis mode">
+        {([["single", "Single message"], ["inbox", "Inbox scan"], ["simulator", "Test yourself"]] as [Mode, string][]).map(([value, label]) => (
+          <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={`rounded-lg px-3 py-2 text-sm font-black transition sm:px-4 ${mode === value ? "bg-stone-950 text-white" : "text-stone-600 hover:text-stone-900"}`}>
             {label}
           </button>
         ))}
       </div>
 
       {mode === "inbox" && <div className="mt-6"><InboxScan language={language} /></div>}
+      {mode === "simulator" && <div className="mt-6"><ScamSimulator language={language} /></div>}
 
       {mode === "single" && <>
       <p className="mt-4 max-w-xl text-lg text-stone-600">Paste a suspicious message. Raksha shows the traps before they work.</p>

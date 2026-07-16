@@ -1,167 +1,133 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { exampleFixtures } from "@/lib/example-fixtures";
+import { capConfidence, type QuickVerdict, type ScamAnalysis } from "@/lib/scam-analysis";
+import InboxScan from "./inbox-scan";
+import { InjectionBanner, TrapMap, verdictLabels, verdictStyles, type Language } from "./trap-map";
 
-type Segment = { text: string; tactic: string; explanation: string };
-type Analysis = {
-  verdict: "scam" | "suspicious" | "likely_safe";
-  confidence: number;
-  scam_type: string;
-  segments: Segment[];
-  next_moves: string[];
-  action: string;
-  injection_detected: boolean;
-  injection_explanation: string;
-  language_outputs: { hi: string; mr: string; en: string };
-};
+// Re-exported so tests and other modules keep a stable import path.
+export { resolveSegments } from "./trap-map";
 
-type ResolvedSegment = Segment & { start: number; end: number };
+type Analysis = ScamAnalysis;
+type Mode = "single" | "inbox";
 
-const verdictStyles = {
-  scam: "border-red-300 bg-red-50 text-red-950",
-  suspicious: "border-amber-300 bg-amber-50 text-amber-950",
-  likely_safe: "border-emerald-300 bg-emerald-50 text-emerald-950"
-};
-
-export function resolveSegments(message: string, segments: Segment[]): ResolvedSegment[] {
-  const occurrences = new Map<string, number>();
-
-  return segments
-    .map((segment) => {
-      if (!segment.text) return null;
-      const seen = occurrences.get(segment.text) ?? 0;
-      let start = -1;
-      let from = 0;
-
-      for (let index = 0; index <= seen; index += 1) {
-        start = message.indexOf(segment.text, from);
-        if (start === -1) return null;
-        from = start + segment.text.length;
-      }
-
-      occurrences.set(segment.text, seen + 1);
-      return { ...segment, start, end: start + segment.text.length };
-    })
-    .filter((segment): segment is ResolvedSegment => segment !== null)
-    .sort((first, second) => first.start - second.start)
-    .filter((segment, index, all) => index === 0 || segment.start >= all[index - 1].end);
-}
-
-function TrapMap({ message, segments }: { message: string; segments: Segment[] }) {
-  const resolved = resolveSegments(message, segments);
-  let cursor = 0;
-
+function VerdictBanner({ verdict, language, analysis }: { verdict: QuickVerdict; language: Language; analysis: Analysis | null }) {
+  const languageName = { en: "English", hi: "हिंदी", mr: "मराठी" }[language];
+  const confidence = Math.round(capConfidence(verdict.confidence, verdict.verdict));
   return (
-    <div className="rounded-2xl border border-stone-200 bg-white p-5 leading-8 text-stone-800 shadow-sm">
-      {resolved.map((segment) => {
-        const before = message.slice(cursor, segment.start);
-        cursor = segment.end;
-        return (
-          <span key={`${segment.start}-${segment.text}`}>
-            {before}
-            <mark className="mx-0.5 rounded bg-amber-200 px-1.5 py-1 text-stone-900" title={segment.explanation}>
-              {segment.text}
-              <span className="ml-1 text-xs font-bold uppercase tracking-wide text-amber-900">[{segment.tactic}]</span>
-            </mark>
-          </span>
-        );
-      })}
-      {message.slice(cursor)}
+    <div className={`rounded-2xl border p-4 shadow-sm sm:p-5 ${verdictStyles[verdict.verdict]}`}>
+      <p className="text-sm font-bold uppercase tracking-wide">{analysis ? "Verdict" : "Quick check"}</p>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h2 className="text-2xl font-black sm:text-3xl">{verdictLabels[verdict.verdict][language]}</h2>
+        <span className="font-semibold">{confidence}% confidence</span>
+      </div>
+      <p className="mt-2 text-sm font-bold">{verdict.scam_type}</p>
+      {analysis && (
+        <p className="mt-4 text-2xl font-black leading-10 sm:text-3xl sm:leading-[2.75rem]">
+          {analysis.language_outputs[language]}
+        </p>
+      )}
+      {analysis && <p className="mt-2 text-xs font-semibold uppercase tracking-wide opacity-70">Grandma Mode · {languageName}</p>}
     </div>
   );
 }
 
 export default function ScamAnalyzer() {
+  const [mode, setMode] = useState<Mode>("single");
   const [message, setMessage] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [quickVerdict, setQuickVerdict] = useState<QuickVerdict | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState<Language>("en");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState("");
+  const [chatError, setChatError] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+
+  async function requestAnalysis(requestMode?: "quick") {
+    const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, mode: requestMode }) });
+    const payload = (await response.json()) as Analysis | QuickVerdict | { error: string };
+    if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Analysis failed.");
+    return payload;
+  }
 
   async function analyze(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError("");
-    setAnalysis(null);
-
-    if (!message.trim()) {
-      setError("Paste a message first.");
-      return;
-    }
-
+    setError(""); setAnalysis(null); setQuickVerdict(null); setAnswer("");
+    if (!message.trim()) { setError("Paste a message first."); return; }
     setLoading(true);
-    try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message })
-      });
-      const payload = (await response.json()) as Analysis | { error: string };
-      if (!response.ok || "error" in payload) {
-        throw new Error("error" in payload ? payload.error : "Analysis failed.");
-      }
-      setAnalysis(payload);
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Analysis failed.");
-    } finally {
-      setLoading(false);
-    }
+    void requestAnalysis("quick").then((payload) => setQuickVerdict(payload as QuickVerdict)).catch(() => undefined);
+    try { setAnalysis(await requestAnalysis() as Analysis); }
+    catch (caughtError) { setError(caughtError instanceof Error ? caughtError.message : "Analysis failed."); }
+    finally { setLoading(false); }
   }
 
-  return (
-    <main className="min-h-screen bg-[#f7f8f2] px-5 py-10 sm:px-8">
-      <section className="mx-auto max-w-3xl">
-        <p className="text-sm font-bold uppercase tracking-[0.22em] text-emerald-700">Raksha</p>
-        <h1 className="mt-3 max-w-2xl text-4xl font-black tracking-tight text-stone-950 sm:text-5xl">Scam autopsy, not scam detection.</h1>
-        <p className="mt-4 max-w-xl text-lg text-stone-600">Paste a suspicious message. Raksha shows the traps before they work.</p>
+  function loadExample(id: string) {
+    const fixture = exampleFixtures.find((item) => item.id === id);
+    if (!fixture) return;
+    setMessage(fixture.message); setAnalysis(fixture.analysis); setQuickVerdict(fixture.analysis); setError(""); setAnswer("");
+  }
 
-        <form onSubmit={analyze} className="mt-8">
-          <label htmlFor="message" className="sr-only">Suspicious message</label>
-          <textarea
-            id="message"
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            placeholder="Paste an SMS, WhatsApp forward, email, or offer here..."
-            className="min-h-56 w-full resize-y rounded-2xl border border-stone-300 bg-white p-5 text-base leading-7 text-stone-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100"
-          />
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p>
-            <button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">
-              {loading ? "Analyzing…" : "Analyze message"}
-            </button>
-          </div>
-          {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
-        </form>
+  async function askFollowUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!analysis || !question.trim()) return;
+    setChatLoading(true); setChatError(""); setAnswer("");
+    try {
+      const response = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, analysis, question }) });
+      const payload = (await response.json()) as { answer?: string; error?: string };
+      if (!response.ok || !payload.answer) throw new Error(payload.error ?? "Follow-up failed.");
+      setAnswer(payload.answer);
+    } catch (caughtError) { setChatError(caughtError instanceof Error ? caughtError.message : "Follow-up failed."); }
+    finally { setChatLoading(false); }
+  }
 
-        {analysis && (
-          <section className="mt-10 space-y-6" aria-live="polite">
-            <div className={`rounded-2xl border p-5 ${verdictStyles[analysis.verdict]}`}>
-              <p className="text-sm font-bold uppercase tracking-wide">Verdict</p>
-              <div className="mt-1 flex flex-wrap items-baseline gap-x-3">
-                <h2 className="text-3xl font-black">{analysis.verdict.replace("_", " ")}</h2>
-                <span className="font-semibold">{Math.round(analysis.confidence)}% confidence</span>
-              </div>
-              <p className="mt-2 text-sm font-medium">{analysis.scam_type}</p>
-            </div>
+  const displayedVerdict = analysis ?? quickVerdict;
 
-            <div>
-              <h2 className="text-xl font-black text-stone-950">Trap Map</h2>
-              <p className="mb-3 mt-1 text-sm text-stone-600">Highlighted text is copied directly from the message.</p>
-              <TrapMap message={message} segments={analysis.segments} />
-            </div>
+  return <main className="min-h-screen bg-[#f7f8f2] px-4 py-7 sm:px-8 sm:py-10">
+    <section className="mx-auto max-w-3xl">
+      <header className="flex items-start justify-between gap-4">
+        <div><p className="text-sm font-bold uppercase tracking-[0.22em] text-emerald-700">Raksha</p><h1 className="mt-3 max-w-2xl text-3xl font-black tracking-tight text-stone-950 sm:text-5xl">Scam autopsy, not scam detection.</h1></div>
+        <div className="flex shrink-0 rounded-xl border border-stone-300 bg-white p-1" aria-label="Grandma Mode language">
+          {(["en", "hi", "mr"] as Language[]).map((item) => <button key={item} type="button" onClick={() => setLanguage(item)} className={`rounded-lg px-2 py-1.5 text-xs font-black ${language === item ? "bg-emerald-700 text-white" : "text-stone-600"}`}>{item.toUpperCase()}</button>)}
+        </div>
+      </header>
 
-            {analysis.injection_detected && (
-              <div className="rounded-2xl border border-red-300 bg-red-50 p-5 text-red-950">
-                <p className="font-black">AI manipulation attempt</p>
-                <p className="mt-1 text-sm">{analysis.injection_explanation}</p>
-              </div>
-            )}
+      <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-stone-300 bg-white p-1 sm:inline-flex" role="tablist" aria-label="Analysis mode">
+        {([["single", "Single message"], ["inbox", "Inbox scan"]] as [Mode, string][]).map(([value, label]) => (
+          <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={`rounded-lg px-4 py-2 text-sm font-black transition ${mode === value ? "bg-stone-950 text-white" : "text-stone-600 hover:text-stone-900"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
 
-            <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
-              <h2 className="font-black text-stone-950">What to do now</h2>
-              <p className="mt-2 text-stone-700">{analysis.action}</p>
-            </div>
-          </section>
-        )}
-      </section>
-    </main>
-  );
+      {mode === "inbox" && <div className="mt-6"><InboxScan language={language} /></div>}
+
+      {mode === "single" && <>
+      <p className="mt-4 max-w-xl text-lg text-stone-600">Paste a suspicious message. Raksha shows the traps before they work.</p>
+
+      <form onSubmit={analyze} className="mt-8">
+        <textarea id="message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Paste an SMS, WhatsApp forward, email, or offer here..." className="min-h-52 w-full resize-y rounded-2xl border border-stone-300 bg-white p-4 text-base leading-7 text-stone-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100 sm:p-5" />
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Building your Trap Map…" : "Analyze message"}</button></div>
+        {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+      </form>
+
+      <div className="mt-6"><p className="text-sm font-bold text-stone-700">Or try an instant example</p><div className="mt-2 flex flex-wrap gap-2">{exampleFixtures.map((fixture) => <button type="button" key={fixture.id} onClick={() => loadExample(fixture.id)} className="rounded-full border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-700 hover:border-emerald-600 hover:text-emerald-800">{fixture.label}</button>)}</div></div>
+
+      {loading && !displayedVerdict && <div className="mt-8 rounded-2xl border border-stone-200 bg-white p-5 text-stone-600 shadow-sm">Checking the message and mapping its tactics…</div>}
+      {displayedVerdict && <section className="mt-10 space-y-6" aria-live="polite">
+        <VerdictBanner verdict={displayedVerdict} language={language} analysis={analysis} />
+        {loading && !analysis && <p className="rounded-xl bg-white p-4 text-sm font-semibold text-stone-600 shadow-sm">Verdict is ready. The detailed Trap Map is still loading…</p>}
+        {analysis && <>
+          {analysis.injection_detected && <InjectionBanner explanation={analysis.injection_explanation} />}
+          <div><h2 className="text-xl font-black text-stone-950">Trap Map</h2><p className="mb-3 mt-1 text-sm text-stone-600">Tap a highlighted phrase to see how it manipulates you.</p><TrapMap message={message} segments={analysis.segments} /></div>
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><h2 className="text-xl font-black text-stone-950">What happens next</h2><ol className="mt-4 space-y-4">{analysis.next_moves.map((move, index) => <li key={move} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-950 text-sm font-black text-white">{index + 1}</span><p className="pt-0.5 text-stone-700">{move}</p></li>)}</ol></div>
+          <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 p-5 shadow-sm"><p className="text-sm font-black uppercase tracking-wide text-emerald-800">One clear action</p><p className="mt-2 text-xl font-black leading-8 text-emerald-950">{language === "en" ? analysis.action : analysis.language_outputs[language]}</p></div>
+          <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><h2 className="text-xl font-black text-stone-950">Ask about this message</h2><p className="mt-1 text-sm text-stone-600">For example: “Why is this fake? The number looked real.”</p><form onSubmit={askFollowUp} className="mt-4"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a follow-up…" className="min-h-24 w-full rounded-xl border border-stone-300 p-3 outline-none focus:border-emerald-600" /><div className="mt-3 flex items-center gap-3"><button disabled={chatLoading} className="rounded-xl bg-stone-950 px-4 py-2.5 font-bold text-white disabled:opacity-60">{chatLoading ? "Thinking…" : "Ask Raksha"}</button>{chatError && <p className="text-sm text-red-700">{chatError}</p>}</div></form>{answer && <p className="mt-4 rounded-xl bg-stone-100 p-4 leading-7 text-stone-800">{answer}</p>}</div>
+        </>}
+      </section>}
+      </>}
+    </section>
+  </main>;
 }

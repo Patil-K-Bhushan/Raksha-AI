@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { exampleFixtures } from "@/lib/example-fixtures";
 import { capConfidence, type QuickVerdict, type ScamAnalysis } from "@/lib/scam-analysis";
 import InboxScan from "./inbox-scan";
@@ -34,7 +34,7 @@ function VerdictBanner({ verdict, language, analysis }: { verdict: QuickVerdict;
   );
 }
 
-export default function ScamAnalyzer() {
+export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
   const [mode, setMode] = useState<Mode>("single");
   const [message, setMessage] = useState("");
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -47,23 +47,49 @@ export default function ScamAnalyzer() {
   const [chatError, setChatError] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
 
-  async function requestAnalysis(requestMode?: "quick") {
-    const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, mode: requestMode }) });
+  async function requestAnalysis(text: string, requestMode?: "quick") {
+    const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, mode: requestMode }) });
     const payload = (await response.json()) as Analysis | QuickVerdict | { error: string };
     if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Analysis failed.");
     return payload;
   }
 
-  async function analyze(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function analyzeMessage(text: string) {
     setError(""); setAnalysis(null); setQuickVerdict(null); setAnswer("");
-    if (!message.trim()) { setError("Paste a message first."); return; }
+    if (!text.trim()) { setError("Paste a message first."); return; }
     setLoading(true);
-    void requestAnalysis("quick").then((payload) => setQuickVerdict(payload as QuickVerdict)).catch(() => undefined);
-    try { setAnalysis(await requestAnalysis() as Analysis); }
+    void requestAnalysis(text, "quick").then((payload) => setQuickVerdict(payload as QuickVerdict)).catch(() => undefined);
+    try { setAnalysis(await requestAnalysis(text) as Analysis); }
     catch (caughtError) { setError(caughtError instanceof Error ? caughtError.message : "Analysis failed."); }
     finally { setLoading(false); }
   }
+
+  async function analyze(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await analyzeMessage(message);
+  }
+
+  /** One-tap phone flow: reads the copied SMS via the browser's clipboard permission prompt. */
+  async function pasteAndScan() {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text.trim()) { setError("Clipboard is empty — copy the SMS first, then tap again."); return; }
+      setMessage(text);
+      await analyzeMessage(text);
+    } catch {
+      setError("Clipboard permission was declined. Long-press the box to paste instead.");
+    }
+  }
+
+  // Android share-target: an SMS shared into the installed app arrives as sharedText.
+  const sharedHandled = useRef(false);
+  useEffect(() => {
+    if (!sharedText || sharedHandled.current) return;
+    sharedHandled.current = true;
+    setMessage(sharedText);
+    void analyzeMessage(sharedText);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sharedText]);
 
   function loadExample(id: string) {
     const fixture = exampleFixtures.find((item) => item.id === id);
@@ -111,11 +137,16 @@ export default function ScamAnalyzer() {
 
       <form onSubmit={analyze} className="mt-8">
         <textarea id="message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Paste an SMS, WhatsApp forward, email, or offer here..." className="min-h-52 w-full resize-y rounded-2xl border border-stone-300 bg-white p-4 text-base leading-7 text-stone-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100 sm:p-5" />
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Building your Trap Map…" : "Analyze message"}</button></div>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => void pasteAndScan()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-5 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📋 Paste &amp; scan</button><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Building your Trap Map…" : "Analyze message"}</button></div></div>
         {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       </form>
 
       <div className="mt-6"><p className="text-sm font-bold text-stone-700">Or try an instant example</p><div className="mt-2 flex flex-wrap gap-2">{exampleFixtures.map((fixture) => <button type="button" key={fixture.id} onClick={() => loadExample(fixture.id)} className="rounded-full border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-stone-700 hover:border-emerald-600 hover:text-emerald-800">{fixture.label}</button>)}</div></div>
+
+      <div className="mt-6 rounded-2xl border border-stone-200 bg-white p-4 text-sm leading-6 text-stone-600 shadow-sm">
+        <p className="font-bold text-stone-800">📱 On your phone</p>
+        <p className="mt-1">Install Raksha from your browser menu (&ldquo;Add to Home Screen&rdquo;). Then in any SMS or WhatsApp message tap Share → Raksha and the scan starts instantly. Or copy a message and tap &ldquo;Paste &amp; scan&rdquo; — your phone asks once for clipboard permission.</p>
+      </div>
 
       {loading && !displayedVerdict && <div className="mt-8 rounded-2xl border border-stone-200 bg-white p-5 text-stone-600 shadow-sm">Checking the message and mapping its tactics…</div>}
       {displayedVerdict && <section className="mt-10 space-y-6" aria-live="polite">

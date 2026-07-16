@@ -5,6 +5,7 @@ export type ProviderName = "gemini" | "groq" | "openai";
 
 export interface AnalysisProvider {
   analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis>;
+  generateJson<T>(input: { instructions: string; data: string; schema: object }): Promise<T>;
 }
 
 class GeminiProvider implements AnalysisProvider {
@@ -15,6 +16,10 @@ class GeminiProvider implements AnalysisProvider {
   }
 
   async analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis> {
+    return this.generateJson<ScamAnalysis>({ ...input, schema: analysisSchema });
+  }
+
+  async generateJson<T>(input: { instructions: string; data: string; schema: object }): Promise<T> {
     const response = await this.client.models.generateContent({
       model: "gemini-flash-lite-latest",
       contents: [
@@ -23,7 +28,7 @@ class GeminiProvider implements AnalysisProvider {
       config: {
         systemInstruction: input.instructions,
         responseMimeType: "application/json",
-        responseJsonSchema: analysisSchema
+        responseJsonSchema: input.schema
       }
     });
 
@@ -31,7 +36,7 @@ class GeminiProvider implements AnalysisProvider {
       throw new Error("The Gemini analysis service returned no result.");
     }
 
-    return JSON.parse(response.text) as ScamAnalysis;
+    return JSON.parse(response.text) as T;
   }
 }
 

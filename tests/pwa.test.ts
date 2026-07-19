@@ -62,6 +62,15 @@ describe("app wiring", () => {
     expect(guard).toContain("vibrate");
   });
 
+  it("offers voice-note analysis, family warning, and complaint draft", () => {
+    const analyzer = read("app/scam-analyzer.tsx");
+    expect(analyzer).toContain("/api/analyze-audio");
+    expect(analyzer).toContain("navigator.share");
+    expect(analyzer).toContain("Warn your family");
+    expect(analyzer).toContain("cybercrime.gov.in");
+    expect(analyzer).toContain("buildComplaint");
+  });
+
   it("shows the Golden Hour recovery card on scam verdicts", () => {
     expect(read("app/scam-analyzer.tsx")).toMatch(/verdict === "scam" && <GoldenHourCard/);
     const trapMap = read("app/trap-map.tsx");

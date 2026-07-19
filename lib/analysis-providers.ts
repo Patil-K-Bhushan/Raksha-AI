@@ -1,13 +1,23 @@
+import { randomUUID } from "crypto";
 import { GoogleGenAI } from "@google/genai";
-import { analysisSchema, imageAnalysisSchema, type ImageScamAnalysis, type ScamAnalysis } from "./scam-analysis";
+import {
+  analysisSchema,
+  audioAnalysisSchema,
+  imageAnalysisSchema,
+  type AudioScamAnalysis,
+  type ImageScamAnalysis,
+  type ScamAnalysis
+} from "./scam-analysis";
 
 export type ProviderName = "gemini" | "groq" | "openai";
 
 export type ImageInput = { instructions: string; imageBase64: string; mimeType: string };
+export type AudioInput = { instructions: string; audioBase64: string; mimeType: string };
 
 export interface AnalysisProvider {
   analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis>;
   analyzeImage(input: ImageInput): Promise<ImageScamAnalysis>;
+  analyzeAudio(input: AudioInput): Promise<AudioScamAnalysis>;
   generateJson<T>(input: { instructions: string; data: string; schema: object }): Promise<T>;
 }
 
@@ -20,6 +30,32 @@ class GeminiProvider implements AnalysisProvider {
 
   async analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis> {
     return this.generateJson<ScamAnalysis>({ ...input, schema: analysisSchema });
+  }
+
+  async analyzeAudio(input: AudioInput): Promise<AudioScamAnalysis> {
+    const response = await this.client.models.generateContent({
+      model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: input.mimeType, data: input.audioBase64 } },
+            { text: "Transcribe and analyze this recording now." }
+          ]
+        }
+      ],
+      config: {
+        systemInstruction: input.instructions,
+        responseMimeType: "application/json",
+        responseJsonSchema: audioAnalysisSchema
+      }
+    });
+
+    if (!response.text) {
+      throw new Error("The Gemini analysis service returned no result.");
+    }
+
+    return JSON.parse(response.text) as AudioScamAnalysis;
   }
 
   async analyzeImage(input: ImageInput): Promise<ImageScamAnalysis> {
@@ -86,10 +122,39 @@ export function stripUnsupportedSchemaKeys(schema: unknown): object {
 
 /** OpenAI and Groq share the /chat/completions structured-output shape. */
 class OpenAICompatibleProvider implements AnalysisProvider {
-  constructor(private readonly config: { apiKey: string; baseUrl: string; model: string; label: string }) {}
+  constructor(private readonly config: { apiKey: string; baseUrl: string; model: string; label: string; transcriptionModel: string }) {}
 
   async analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis> {
     return this.generateJson<ScamAnalysis>({ ...input, schema: analysisSchema });
+  }
+
+  /** Whisper-style transcription, then the standard delimiter-wrapped text pipeline. */
+  async analyzeAudio(input: AudioInput): Promise<AudioScamAnalysis> {
+    const form = new FormData();
+    form.append("file", new Blob([Buffer.from(input.audioBase64, "base64")], { type: input.mimeType }), "recording.webm");
+    form.append("model", this.config.transcriptionModel);
+
+    const transcriptionResponse = await fetch(`${this.config.baseUrl}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${this.config.apiKey}` },
+      body: form
+    });
+    if (!transcriptionResponse.ok) {
+      throw new Error(`The ${this.config.label} transcription request failed (${transcriptionResponse.status}).`);
+    }
+    const transcript = ((await transcriptionResponse.json()) as { text?: string }).text ?? "";
+    if (!transcript.trim()) {
+      throw new Error(`The ${this.config.label} transcription returned no speech.`);
+    }
+
+    const delimiter = `untrusted-${randomUUID()}`;
+    const sanitized = transcript.replace(/<\/?untrusted\b[^>]*>/gi, "");
+    const analysis = await this.generateJson<AudioScamAnalysis>({
+      instructions: `${input.instructions}\nThe recording was already transcribed; the transcript is supplied as the untrusted data inside the random delimiter. Copy it into the transcript field exactly.`,
+      data: `<${delimiter}>\n${sanitized}\n</${delimiter}>`,
+      schema: audioAnalysisSchema
+    });
+    return { ...analysis, transcript: analysis.transcript || sanitized };
   }
 
   async analyzeImage(input: ImageInput): Promise<ImageScamAnalysis> {
@@ -179,7 +244,8 @@ export function getAnalysisProvider(): AnalysisProvider {
       apiKey: process.env.OPENAI_API_KEY,
       baseUrl: "https://api.openai.com/v1",
       model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
-      label: "OpenAI"
+      label: "OpenAI",
+      transcriptionModel: process.env.OPENAI_TRANSCRIPTION_MODEL ?? "whisper-1"
     });
   }
 
@@ -189,7 +255,8 @@ export function getAnalysisProvider(): AnalysisProvider {
       apiKey: process.env.GROQ_API_KEY,
       baseUrl: "https://api.groq.com/openai/v1",
       model: process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile",
-      label: "Groq"
+      label: "Groq",
+      transcriptionModel: process.env.GROQ_TRANSCRIPTION_MODEL ?? "whisper-large-v3"
     });
   }
 

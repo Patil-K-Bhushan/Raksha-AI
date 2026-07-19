@@ -47,6 +47,8 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
   const [answer, setAnswer] = useState("");
   const [chatError, setChatError] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
+  const [shareNote, setShareNote] = useState("");
+  const [complaint, setComplaint] = useState("");
 
   async function requestAnalysis(text: string, requestMode?: "quick") {
     const response = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: text, mode: requestMode }) });
@@ -57,6 +59,7 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
 
   async function analyzeMessage(text: string) {
     setError(""); setAnalysis(null); setQuickVerdict(null); setAnswer("");
+    setShareNote(""); setComplaint("");
     if (!text.trim()) { setError("Paste a message first."); return; }
     setLoading(true);
     void requestAnalysis(text, "quick").then((payload) => setQuickVerdict(payload as QuickVerdict)).catch(() => undefined);
@@ -110,6 +113,80 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
     } finally {
       setLoading(false);
     }
+  }
+
+  /** Voice-note flow: WhatsApp audio / voicemail → transcript + Trap Map. */
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  async function handleVoiceNote(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 3_000_000) { setError("Please use a recording under 3 MB (about 3-4 minutes)."); return; }
+    setError(""); setAnalysis(null); setQuickVerdict(null); setAnswer("");
+    setShareNote(""); setComplaint("");
+    setLoading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read the recording."));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(",")[1] ?? "";
+      const response = await fetch("/api/analyze-audio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audio: base64, mime_type: file.type || "audio/mpeg" }) });
+      const payload = (await response.json()) as (Analysis & { transcript: string }) | { error: string };
+      if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Audio analysis failed.");
+      setMessage(payload.transcript);
+      setAnalysis(payload);
+      setQuickVerdict(payload);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Audio analysis failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /** One tap → the warning goes to the family WhatsApp group via the system share sheet. */
+  function buildWarning(): string {
+    if (!analysis) return "";
+    return `⚠️ Raksha scam alert: ${analysis.scam_type}\n\n${analysis.language_outputs[language]}\n\n${analysis.action}\n\nChecked with Raksha — raksha-ai-silk.vercel.app`;
+  }
+  async function warnFamily() {
+    const text = buildWarning();
+    if (!text) return;
+    if (navigator.share) {
+      try { await navigator.share({ text }); setShareNote("Shared."); } catch { /* user closed the sheet */ }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setShareNote("Copied — paste it into your family group.");
+    } catch {
+      setShareNote("Could not share on this device.");
+    }
+  }
+
+  /** Deterministic complaint draft — no API call, so it can never fail in a demo. */
+  function buildComplaint(): string {
+    if (!analysis) return "";
+    const today = new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "long", year: "numeric" });
+    const tactics = analysis.segments.map((segment) => `- "${segment.text}" (${segment.tactic})`).join("\n");
+    return [
+      "COMPLAINT DRAFT — National Cybercrime Reporting Portal (cybercrime.gov.in) / Helpline 1930",
+      "",
+      `Date of incident: ${today}`,
+      `Type of fraud: ${analysis.scam_type}`,
+      "",
+      "Description: I received the following fraudulent communication:",
+      `"${message.slice(0, 800)}"`,
+      tactics ? `\nManipulation tactics identified by analysis:\n${tactics}` : "",
+      `\nExpected next steps by the fraudsters: ${analysis.next_moves.join("; ")}`,
+      "",
+      "I request that this be investigated and any linked transactions or beneficiary accounts be frozen.",
+      "",
+      "Name: ____________   Phone: ____________",
+      "Transaction ID (if money was sent): ____________"
+    ].filter(Boolean).join("\n");
   }
 
   // Android share-target: an SMS shared into the installed app arrives as sharedText.
@@ -169,7 +246,7 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
 
       <form onSubmit={analyze} className="mt-8">
         <textarea id="message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Paste an SMS, WhatsApp forward, email, or offer here..." className="min-h-52 w-full resize-y rounded-2xl border border-stone-300 bg-white p-4 text-base leading-7 text-stone-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100 sm:p-5" />
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><div className="flex flex-col gap-2 sm:flex-row"><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void handleScreenshot(event)} /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-5 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📷 Screenshot</button><button type="button" onClick={() => void pasteAndScan()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-5 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📋 Paste &amp; scan</button><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Building your Trap Map…" : "Analyze message"}</button></div></div>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row"><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void handleScreenshot(event)} /><input ref={audioInputRef} type="file" accept="audio/*" className="hidden" onChange={(event) => void handleVoiceNote(event)} /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-4 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📷 Screenshot</button><button type="button" onClick={() => audioInputRef.current?.click()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-4 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">🎤 Voice note</button><button type="button" onClick={() => void pasteAndScan()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-4 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📋 Paste &amp; scan</button><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Analyzing…" : "Analyze message"}</button></div></div>
         {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       </form>
 
@@ -190,6 +267,23 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
           <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><h2 className="text-xl font-black text-stone-950">What happens next</h2><ol className="mt-4 space-y-4">{analysis.next_moves.map((move, index) => <li key={move} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-950 text-sm font-black text-white">{index + 1}</span><p className="pt-0.5 text-stone-700">{move}</p></li>)}</ol></div>
           <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 p-5 shadow-sm"><p className="text-sm font-black uppercase tracking-wide text-emerald-800">One clear action</p><p className="mt-2 text-xl font-black leading-8 text-emerald-950">{language === "en" ? analysis.action : analysis.language_outputs[language]}</p></div>
           {analysis.verdict === "scam" && <GoldenHourCard language={language} />}
+          {analysis.verdict === "scam" && (
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <button type="button" onClick={() => void warnFamily()} className="rounded-xl bg-red-600 px-5 py-3 font-black text-white transition hover:bg-red-700">⚠️ Warn your family</button>
+              <button type="button" onClick={() => setComplaint(buildComplaint())} className="rounded-xl border-2 border-stone-950 px-5 py-3 font-black text-stone-950 transition hover:bg-stone-950 hover:text-white">📝 Complaint draft</button>
+              {shareNote && <p className="text-sm font-semibold text-stone-600">{shareNote}</p>}
+            </div>
+          )}
+          {complaint && analysis.verdict === "scam" && (
+            <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-lg font-black text-stone-950">Ready-to-file complaint</h2>
+                <button type="button" onClick={() => { void navigator.clipboard.writeText(complaint).then(() => setShareNote("Complaint copied.")); }} className="rounded-lg border border-stone-300 px-3 py-1.5 text-sm font-bold text-stone-700 hover:border-emerald-600">Copy</button>
+              </div>
+              <p className="mt-1 text-sm text-stone-500">Paste this at cybercrime.gov.in and fill in the blanks.</p>
+              <textarea readOnly value={complaint} className="mt-3 min-h-64 w-full rounded-xl border border-stone-200 bg-stone-50 p-4 text-sm leading-6 text-stone-800" />
+            </div>
+          )}
           <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><h2 className="text-xl font-black text-stone-950">Ask about this message</h2><p className="mt-1 text-sm text-stone-600">For example: “Why is this fake? The number looked real.”</p><form onSubmit={askFollowUp} className="mt-4"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a follow-up…" className="min-h-24 w-full rounded-xl border border-stone-300 p-3 outline-none focus:border-emerald-600" /><div className="mt-3 flex items-center gap-3"><button disabled={chatLoading} className="rounded-xl bg-stone-950 px-4 py-2.5 font-bold text-white disabled:opacity-60">{chatLoading ? "Thinking…" : "Ask Raksha"}</button>{chatError && <p className="text-sm text-red-700">{chatError}</p>}</div></form>{answer && <p className="mt-4 rounded-xl bg-stone-100 p-4 leading-7 text-stone-800">{answer}</p>}</div>
         </>}
       </section>}

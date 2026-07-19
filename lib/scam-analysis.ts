@@ -137,6 +137,17 @@ export const simulatedScamSchema = {
 
 export type ImageScamAnalysis = ScamAnalysis & { extracted_text: string };
 
+export type AudioScamAnalysis = ScamAnalysis & { transcript: string };
+
+export const audioAnalysisSchema = {
+  ...analysisSchema,
+  required: [...analysisSchema.required, "transcript"],
+  properties: {
+    ...analysisSchema.properties,
+    transcript: { type: "string" }
+  }
+} as const;
+
 export const imageAnalysisSchema = {
   ...analysisSchema,
   required: [...analysisSchema.required, "extracted_text"],

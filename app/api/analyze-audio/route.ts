@@ -1,6 +1,6 @@
 import { getAnalysisProvider } from "@/lib/analysis-providers";
-import { audioInstructions } from "@/lib/analysis-prompt";
-import { normalizeScamAnalysis, type AudioScamAnalysis } from "@/lib/scam-analysis";
+import { audioInstructions, languageDirective } from "@/lib/analysis-prompt";
+import { normalizeScamAnalysis, parseLanguage, type AudioScamAnalysis } from "@/lib/scam-analysis";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -35,8 +35,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Please keep the recording under 3 MB (about 3-4 minutes)." }, { status: 400 });
     }
 
+    const language = parseLanguage((body as { language?: unknown }).language);
     const analysis = await getAnalysisProvider().analyzeAudio({
-      instructions: audioInstructions,
+      instructions: audioInstructions + languageDirective(language, "analysis"),
       audioBase64: audio,
       mimeType: mimeType.split(";")[0]
     });

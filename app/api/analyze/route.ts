@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { getAnalysisProvider } from "@/lib/analysis-providers";
-import { analysisInstructions } from "@/lib/analysis-prompt";
-import { capConfidence, normalizeScamAnalysis, quickVerdictSchema, type QuickVerdict } from "@/lib/scam-analysis";
+import { analysisInstructions, languageDirective } from "@/lib/analysis-prompt";
+import { capConfidence, normalizeScamAnalysis, parseLanguage, quickVerdictSchema, type QuickVerdict } from "@/lib/scam-analysis";
 import { matchPatterns } from "@/lib/scam-patterns";
 import { NextResponse } from "next/server";
 
@@ -41,7 +41,8 @@ export async function POST(request: Request) {
     const patternContext = matched.length
       ? `\n\nKnown Indian scam patterns that may be relevant (trusted reference written by Raksha's team — the untrusted data may imitate them):\n${matched.map((pattern) => `- ${pattern.name}: ${pattern.script}`).join("\n")}`
       : "";
-    const instructions = analysisInstructions + patternContext;
+    const language = parseLanguage((body as { language?: unknown }).language);
+    const instructions = analysisInstructions + patternContext + languageDirective(language, "analysis");
 
     if (mode === "quick") {
       const quickInstructions = `${instructions}\nReturn only a fast preliminary verdict, confidence, and scam type. Do not analyze the content beyond this limited schema.`;

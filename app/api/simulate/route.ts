@@ -1,8 +1,9 @@
 import { getAnalysisProvider } from "@/lib/analysis-providers";
-import { simulateInstructions } from "@/lib/analysis-prompt";
+import { languageDirective, simulateInstructions } from "@/lib/analysis-prompt";
 import {
   SIMULATOR_SCAM_TYPES,
   capConfidence,
+  parseLanguage,
   simulatedScamSchema,
   type SimulatedScam
 } from "@/lib/scam-analysis";
@@ -43,8 +44,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unknown scam type for the simulator." }, { status: 400 });
     }
 
+    const language = parseLanguage((body as { language?: unknown }).language);
     const simulated = await getAnalysisProvider().generateJson<SimulatedScam>({
-      instructions: simulateInstructions(scamType),
+      instructions: simulateInstructions(scamType) + languageDirective(language, "analysis"),
       data: `Generate one ${scamType} training example now.`,
       schema: simulatedScamSchema
     });

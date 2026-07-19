@@ -66,9 +66,19 @@ describe("app wiring", () => {
     const analyzer = read("app/scam-analyzer.tsx");
     expect(analyzer).toContain("/api/analyze-audio");
     expect(analyzer).toContain("navigator.share");
-    expect(analyzer).toContain("Warn your family");
+    expect(analyzer).toContain("t.warnFamily");
     expect(analyzer).toContain("cybercrime.gov.in");
     expect(analyzer).toContain("buildComplaint");
+    expect(read("app/ui-strings.ts")).toContain("Warn your family");
+  });
+
+  it("localizes every screen through the ui-strings dictionary + forwards language to the AI", () => {
+    const analyzer = read("app/scam-analyzer.tsx");
+    expect(analyzer).toContain('getStrings');
+    expect(analyzer).toContain("language: languageRef.current");
+    expect(read("app/inbox-scan.tsx")).toContain("getStrings");
+    expect(read("app/scam-simulator.tsx")).toContain("getStrings");
+    expect(read("app/call-guard.tsx")).toContain("copy[language]");
   });
 
   it("shows the Golden Hour recovery card on scam verdicts", () => {

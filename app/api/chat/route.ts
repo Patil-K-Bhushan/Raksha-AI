@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { getAnalysisProvider } from "@/lib/analysis-providers";
-import { chatSchema, type ScamAnalysis } from "@/lib/scam-analysis";
+import { languageDirective } from "@/lib/analysis-prompt";
+import { chatSchema, parseLanguage, type ScamAnalysis } from "@/lib/scam-analysis";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -26,9 +27,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Please keep the follow-up short." }, { status: 400 });
     }
 
+    const language = parseLanguage((body as { language?: unknown }).language);
     const delimiter = `untrusted-${randomUUID()}`;
     const data = `<${delimiter}>\nMESSAGE:\n${sanitizeUntrustedMessage(message)}\n\nANALYSIS JSON:\n${JSON.stringify(analysis)}\n\nQUESTION:\n${sanitizeUntrustedMessage(question)}\n</${delimiter}>`;
-    const response = await getAnalysisProvider().generateJson<{ answer: string }>({ instructions, data, schema: chatSchema });
+    const response = await getAnalysisProvider().generateJson<{ answer: string }>({ instructions: instructions + languageDirective(language, "chat"), data, schema: chatSchema });
     return NextResponse.json(response);
   } catch (error) {
     console.error("Chat failed", error);

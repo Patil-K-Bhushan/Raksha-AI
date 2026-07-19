@@ -1,6 +1,6 @@
 import { getAnalysisProvider } from "@/lib/analysis-providers";
-import { imageInstructions } from "@/lib/analysis-prompt";
-import { normalizeScamAnalysis, type ImageScamAnalysis } from "@/lib/scam-analysis";
+import { imageInstructions, languageDirective } from "@/lib/analysis-prompt";
+import { normalizeScamAnalysis, parseLanguage, type ImageScamAnalysis } from "@/lib/scam-analysis";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
@@ -24,8 +24,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Please use a screenshot under 4 MB." }, { status: 400 });
     }
 
+    const language = parseLanguage((body as { language?: unknown }).language);
     const analysis = await getAnalysisProvider().analyzeImage({
-      instructions: imageInstructions,
+      instructions: imageInstructions + languageDirective(language, "analysis"),
       imageBase64: image,
       mimeType
     });

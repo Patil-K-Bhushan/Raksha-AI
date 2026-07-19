@@ -1,5 +1,12 @@
 export type Verdict = "scam" | "suspicious" | "likely_safe";
 
+export type UILanguage = "en" | "hi" | "mr";
+
+/** Whitelist parse — arbitrary input can never steer the prompt. */
+export function parseLanguage(value: unknown): UILanguage {
+  return value === "hi" || value === "mr" ? value : "en";
+}
+
 export type ScamAnalysis = {
   verdict: Verdict;
   confidence: number;

@@ -1,10 +1,13 @@
 import { GoogleGenAI } from "@google/genai";
-import { analysisSchema, type ScamAnalysis } from "./scam-analysis";
+import { analysisSchema, imageAnalysisSchema, type ImageScamAnalysis, type ScamAnalysis } from "./scam-analysis";
 
 export type ProviderName = "gemini" | "groq" | "openai";
 
+export type ImageInput = { instructions: string; imageBase64: string; mimeType: string };
+
 export interface AnalysisProvider {
   analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis>;
+  analyzeImage(input: ImageInput): Promise<ImageScamAnalysis>;
   generateJson<T>(input: { instructions: string; data: string; schema: object }): Promise<T>;
 }
 
@@ -17,6 +20,32 @@ class GeminiProvider implements AnalysisProvider {
 
   async analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis> {
     return this.generateJson<ScamAnalysis>({ ...input, schema: analysisSchema });
+  }
+
+  async analyzeImage(input: ImageInput): Promise<ImageScamAnalysis> {
+    const response = await this.client.models.generateContent({
+      model: process.env.GEMINI_MODEL ?? "gemini-flash-lite-latest",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: input.mimeType, data: input.imageBase64 } },
+            { text: "Analyze the screenshot now." }
+          ]
+        }
+      ],
+      config: {
+        systemInstruction: input.instructions,
+        responseMimeType: "application/json",
+        responseJsonSchema: imageAnalysisSchema
+      }
+    });
+
+    if (!response.text) {
+      throw new Error("The Gemini analysis service returned no result.");
+    }
+
+    return JSON.parse(response.text) as ImageScamAnalysis;
   }
 
   async generateJson<T>(input: { instructions: string; data: string; schema: object }): Promise<T> {
@@ -61,6 +90,45 @@ class OpenAICompatibleProvider implements AnalysisProvider {
 
   async analyze(input: { instructions: string; data: string }): Promise<ScamAnalysis> {
     return this.generateJson<ScamAnalysis>({ ...input, schema: analysisSchema });
+  }
+
+  async analyzeImage(input: ImageInput): Promise<ImageScamAnalysis> {
+    const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.config.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: this.config.model,
+        messages: [
+          { role: "system", content: input.instructions },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Analyze the screenshot now." },
+              { type: "image_url", image_url: { url: `data:${input.mimeType};base64,${input.imageBase64}` } }
+            ]
+          }
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "raksha_image_output", strict: true, schema: stripUnsupportedSchemaKeys(imageAnalysisSchema) }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`The ${this.config.label} analysis service request failed (${response.status}).`);
+    }
+
+    const payload = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = payload.choices?.[0]?.message?.content;
+    if (!text) {
+      throw new Error(`The ${this.config.label} analysis service returned no result.`);
+    }
+
+    return JSON.parse(text) as ImageScamAnalysis;
   }
 
   async generateJson<T>(input: { instructions: string; data: string; schema: object }): Promise<T> {

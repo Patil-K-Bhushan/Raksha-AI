@@ -51,4 +51,21 @@ describe("app wiring", () => {
     expect(analyzer).toContain("navigator.clipboard.readText");
     expect(analyzer).toContain("sharedHandled");
   });
+
+  it("offers the screenshot vision flow and Call Guard tab", () => {
+    const analyzer = read("app/scam-analyzer.tsx");
+    expect(analyzer).toContain("/api/analyze-image");
+    expect(analyzer).toContain("CallGuard");
+    const guard = read("app/call-guard.tsx");
+    expect(guard).toContain("webkitSpeechRecognition");
+    expect(guard).toContain('mode: "quick"');
+    expect(guard).toContain("vibrate");
+  });
+
+  it("shows the Golden Hour recovery card on scam verdicts", () => {
+    expect(read("app/scam-analyzer.tsx")).toMatch(/verdict === "scam" && <GoldenHourCard/);
+    const trapMap = read("app/trap-map.tsx");
+    expect(trapMap).toContain("1930");
+    expect(trapMap).toContain("cybercrime.gov.in");
+  });
 });

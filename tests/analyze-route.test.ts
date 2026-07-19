@@ -213,6 +213,21 @@ describe("FIX 2 — false positives: legitimate messages", () => {
   });
 });
 
+describe("RAG-lite pattern retrieval", () => {
+  it("injects matching known-scam scripts as trusted context", async () => {
+    await post({ message: "CBI police: you are under digital arrest, join the video call" });
+    const { instructions } = sentInput();
+    expect(instructions).toContain("Known Indian scam patterns");
+    expect(instructions).toContain("Digital arrest");
+  });
+
+  it("adds no pattern context for unmatched text", async () => {
+    await post({ message: "Lunch at 1pm tomorrow?" });
+    const { instructions } = sentInput();
+    expect(instructions).not.toContain("Known Indian scam patterns");
+  });
+});
+
 describe("quick mode (Inbox Scan triage)", () => {
   it("uses the limited quick schema and same untrusted-data wrapping", async () => {
     await post({ message: "You won Rs 25,00,000!", mode: "quick" });

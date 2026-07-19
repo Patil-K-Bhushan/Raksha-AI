@@ -112,6 +112,54 @@ export function TrapMap({ message, segments }: { message: string; segments: Segm
   );
 }
 
+const goldenHourCopy: Record<Language, { title: string; steps: string[] }> = {
+  en: {
+    title: "Already paid or shared an OTP? Act in the golden hour",
+    steps: [
+      "Call 1930 now — the national cybercrime helpline.",
+      "Tell your bank to freeze the transaction immediately.",
+      "File at cybercrime.gov.in with the transaction details.",
+      "Reported fast, money is often frozen and returned."
+    ]
+  },
+  hi: {
+    title: "पैसे चले गए या OTP दे दिया? पहला घंटा सबसे ज़रूरी है",
+    steps: [
+      "अभी 1930 पर call करें।",
+      "Bank को बोलें transaction रोकें।",
+      "cybercrime.gov.in पर report करें।",
+      "जल्दी report करने पर पैसे अक्सर वापस मिलते हैं।"
+    ]
+  },
+  mr: {
+    title: "पैसे गेले किंवा OTP दिला? पहिला तास महत्त्वाचा",
+    steps: [
+      "आत्ता 1930 वर call करा.",
+      "Bank ला transaction थांबवायला सांगा.",
+      "cybercrime.gov.in वर report करा.",
+      "लवकर report केल्यास पैसे अनेकदा परत मिळतात."
+    ]
+  }
+};
+
+/** The Pune ₹35,000 recovery playbook: fast reporting gets money frozen and returned. */
+export function GoldenHourCard({ language }: { language: Language }) {
+  const content = goldenHourCopy[language];
+  return (
+    <div className="rounded-2xl border-2 border-red-600 bg-white p-5 shadow-sm" role="note">
+      <p className="text-lg font-black leading-7 text-red-700">⏱ {content.title}</p>
+      <ol className="mt-3 space-y-2">
+        {content.steps.map((step, index) => (
+          <li key={step} className="flex gap-3 text-base font-bold leading-7 text-stone-800">
+            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-red-600 text-sm font-black text-white">{index + 1}</span>
+            {step}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /** ADVANCE 2 — the "second wow": an injection attempt is itself evidence of fraud. */
 export function InjectionBanner({ explanation }: { explanation: string }) {
   return (

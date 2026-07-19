@@ -135,6 +135,33 @@ export const simulatedScamSchema = {
   }
 } as const;
 
+export type ImageScamAnalysis = ScamAnalysis & { extracted_text: string };
+
+export const imageAnalysisSchema = {
+  ...analysisSchema,
+  required: [...analysisSchema.required, "extracted_text"],
+  properties: {
+    ...analysisSchema.properties,
+    extracted_text: { type: "string" }
+  }
+} as const;
+
+/** Shared server-side normalization: caps confidence, strips likely_safe highlights, guarantees "stay cautious". */
+export function normalizeScamAnalysis<T extends ScamAnalysis>(analysis: T): T {
+  const likelySafe = analysis.verdict === "likely_safe";
+  const english = analysis.language_outputs.en;
+  const englishOutput = likelySafe && !english.toLowerCase().includes("stay cautious")
+    ? `${english.trim()} Stay cautious.`.trim()
+    : english;
+
+  return {
+    ...analysis,
+    confidence: capConfidence(analysis.confidence, analysis.verdict),
+    segments: likelySafe ? [] : analysis.segments,
+    language_outputs: { ...analysis.language_outputs, en: englishOutput }
+  };
+}
+
 export const SIMULATOR_SCAM_TYPES = [
   "digital arrest",
   "UPI collect",

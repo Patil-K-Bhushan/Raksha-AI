@@ -1,17 +1,18 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { exampleFixtures } from "@/lib/example-fixtures";
 import { capConfidence, type QuickVerdict, type ScamAnalysis } from "@/lib/scam-analysis";
+import CallGuard from "./call-guard";
 import InboxScan from "./inbox-scan";
 import ScamSimulator from "./scam-simulator";
-import { InjectionBanner, TrapMap, verdictLabels, verdictStyles, type Language } from "./trap-map";
+import { GoldenHourCard, InjectionBanner, TrapMap, verdictLabels, verdictStyles, type Language } from "./trap-map";
 
 // Re-exported so tests and other modules keep a stable import path.
 export { resolveSegments } from "./trap-map";
 
 type Analysis = ScamAnalysis;
-type Mode = "single" | "inbox" | "simulator";
+type Mode = "single" | "inbox" | "call" | "simulator";
 
 function VerdictBanner({ verdict, language, analysis }: { verdict: QuickVerdict; language: Language; analysis: Analysis | null }) {
   const languageName = { en: "English", hi: "हिंदी", mr: "मराठी" }[language];
@@ -81,6 +82,36 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
     }
   }
 
+  /** Screenshot flow: one tap → vision AI reads the text and visual cues. */
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  async function handleScreenshot(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (file.size > 4_000_000) { setError("Please use a screenshot under 4 MB."); return; }
+    setError(""); setAnalysis(null); setQuickVerdict(null); setAnswer("");
+    setLoading(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(new Error("Could not read the screenshot."));
+        reader.readAsDataURL(file);
+      });
+      const base64 = dataUrl.split(",")[1] ?? "";
+      const response = await fetch("/api/analyze-image", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: base64, mime_type: file.type }) });
+      const payload = (await response.json()) as (Analysis & { extracted_text: string }) | { error: string };
+      if (!response.ok || "error" in payload) throw new Error("error" in payload ? payload.error : "Screenshot analysis failed.");
+      setMessage(payload.extracted_text);
+      setAnalysis(payload);
+      setQuickVerdict(payload);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Screenshot analysis failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   // Android share-target: an SMS shared into the installed app arrives as sharedText.
   const sharedHandled = useRef(false);
   useEffect(() => {
@@ -121,8 +152,8 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
         </div>
       </header>
 
-      <div className="mt-6 grid grid-cols-3 gap-1 rounded-xl border border-stone-300 bg-white p-1 sm:inline-flex" role="tablist" aria-label="Analysis mode">
-        {([["single", "Single message"], ["inbox", "Inbox scan"], ["simulator", "Test yourself"]] as [Mode, string][]).map(([value, label]) => (
+      <div className="mt-6 grid grid-cols-2 gap-1 rounded-xl border border-stone-300 bg-white p-1 sm:inline-flex" role="tablist" aria-label="Analysis mode">
+        {([["single", "Message"], ["inbox", "Inbox scan"], ["call", "Call Guard"], ["simulator", "Practice"]] as [Mode, string][]).map(([value, label]) => (
           <button key={value} type="button" role="tab" aria-selected={mode === value} onClick={() => setMode(value)} className={`rounded-lg px-3 py-2 text-sm font-black transition sm:px-4 ${mode === value ? "bg-stone-950 text-white" : "text-stone-600 hover:text-stone-900"}`}>
             {label}
           </button>
@@ -130,6 +161,7 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
       </div>
 
       {mode === "inbox" && <div className="mt-6"><InboxScan language={language} /></div>}
+      {mode === "call" && <div className="mt-6"><CallGuard language={language} /></div>}
       {mode === "simulator" && <div className="mt-6"><ScamSimulator language={language} /></div>}
 
       {mode === "single" && <>
@@ -137,7 +169,7 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
 
       <form onSubmit={analyze} className="mt-8">
         <textarea id="message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Paste an SMS, WhatsApp forward, email, or offer here..." className="min-h-52 w-full resize-y rounded-2xl border border-stone-300 bg-white p-4 text-base leading-7 text-stone-900 outline-none transition focus:border-emerald-600 focus:ring-4 focus:ring-emerald-100 sm:p-5" />
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><div className="flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => void pasteAndScan()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-5 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📋 Paste &amp; scan</button><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Building your Trap Map…" : "Analyze message"}</button></div></div>
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"><p className="text-sm text-stone-500">Nothing is stored. No account. Analyzed and discarded.</p><div className="flex flex-col gap-2 sm:flex-row"><input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(event) => void handleScreenshot(event)} /><button type="button" onClick={() => fileInputRef.current?.click()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-5 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📷 Screenshot</button><button type="button" onClick={() => void pasteAndScan()} disabled={loading} className="rounded-xl border-2 border-emerald-700 px-5 py-3 font-bold text-emerald-800 transition hover:bg-emerald-50 disabled:opacity-60">📋 Paste &amp; scan</button><button type="submit" disabled={loading} className="rounded-xl bg-emerald-700 px-6 py-3 font-bold text-white transition hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-70">{loading ? "Building your Trap Map…" : "Analyze message"}</button></div></div>
         {error && <p className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       </form>
 
@@ -157,6 +189,7 @@ export default function ScamAnalyzer({ sharedText }: { sharedText?: string }) {
           <div><h2 className="text-xl font-black text-stone-950">Trap Map</h2><p className="mb-3 mt-1 text-sm text-stone-600">Tap a highlighted phrase to see how it manipulates you.</p><TrapMap message={message} segments={analysis.segments} /></div>
           <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><h2 className="text-xl font-black text-stone-950">What happens next</h2><ol className="mt-4 space-y-4">{analysis.next_moves.map((move, index) => <li key={move} className="flex gap-3"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-stone-950 text-sm font-black text-white">{index + 1}</span><p className="pt-0.5 text-stone-700">{move}</p></li>)}</ol></div>
           <div className="rounded-2xl border-2 border-emerald-700 bg-emerald-50 p-5 shadow-sm"><p className="text-sm font-black uppercase tracking-wide text-emerald-800">One clear action</p><p className="mt-2 text-xl font-black leading-8 text-emerald-950">{language === "en" ? analysis.action : analysis.language_outputs[language]}</p></div>
+          {analysis.verdict === "scam" && <GoldenHourCard language={language} />}
           <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-sm"><h2 className="text-xl font-black text-stone-950">Ask about this message</h2><p className="mt-1 text-sm text-stone-600">For example: “Why is this fake? The number looked real.”</p><form onSubmit={askFollowUp} className="mt-4"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask a follow-up…" className="min-h-24 w-full rounded-xl border border-stone-300 p-3 outline-none focus:border-emerald-600" /><div className="mt-3 flex items-center gap-3"><button disabled={chatLoading} className="rounded-xl bg-stone-950 px-4 py-2.5 font-bold text-white disabled:opacity-60">{chatLoading ? "Thinking…" : "Ask Raksha"}</button>{chatError && <p className="text-sm text-red-700">{chatError}</p>}</div></form>{answer && <p className="mt-4 rounded-xl bg-stone-100 p-4 leading-7 text-stone-800">{answer}</p>}</div>
         </>}
       </section>}
